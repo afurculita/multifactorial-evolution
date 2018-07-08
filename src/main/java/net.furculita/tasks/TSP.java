@@ -6,6 +6,7 @@ import net.furculita.util.TSPFileParser;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 public class TSP extends Task {
     private int[][] graph;
@@ -25,9 +26,9 @@ public class TSP extends Task {
         }
     }
 
-    private ArrayList<Integer> decode(ArrayList<Double> tx) {
-        ArrayList<Double> x = new ArrayList<>();
-        ArrayList<Double> tmp_tx = new ArrayList<>(tx);
+    private List<Integer> decode(List<Double> tx) {
+        List<Double> x = new ArrayList<>();
+        List<Double> tmp_tx = new ArrayList<>(tx);
 
         if (tmp_tx.size() > dimension) {
             double window[] = {Math.random(), Math.random()};
@@ -43,7 +44,7 @@ public class TSP extends Task {
             x = tmp_tx;
         }
 
-        ArrayList<Integer> lA = new ArrayList<>();
+        List<Integer> lA = new ArrayList<>();
         Double ts[] = new Double[dimension];
         for (int i = 0; i < dimension; i++) {
             ts[i] = x.get(i);
@@ -58,8 +59,8 @@ public class TSP extends Task {
     }
 
     @Override
-    public Double computeFitness(ArrayList<Double> ind) {
-        ArrayList<Integer> xx = decode(ind);
+    public Double computeFitness(List<Double> ind) {
+        List<Integer> xx = decode(ind);
         double c = 0;
         for (int i = 0; i < xx.size() - 1; i++) {
             c += this.graph[xx.get(i)][xx.get(i + 1)];
@@ -69,11 +70,11 @@ public class TSP extends Task {
     }
 
     @Override
-    public void makeIndividualVail(ArrayList<Double> ind) {
+    public void makeIndividualVail(List<Double> ind) {
     }
 
     @Override
-    public boolean checkIndividualVail(ArrayList<Double> ind) {
+    public boolean checkIndividualVail(List<Double> ind) {
         return false;
     }
 

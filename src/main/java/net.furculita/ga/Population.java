@@ -1,17 +1,17 @@
 package net.furculita.ga;
 
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Random;
 
 class Population {
     int nIndividual;
     private int nTask;
     private int lenGen;
-    private ArrayList<Individual> individuals = null;
+    private List<Individual> individuals = null;
+    private List<Task> tasks;
 
-    private ArrayList<Task> tasks;
-
-    Population(int n, ArrayList<Task> tasks) {
+    Population(int n, List<Task> tasks) {
         this.nIndividual = n;
         this.nTask = tasks.size();
         this.tasks = tasks;
@@ -124,14 +124,14 @@ class Population {
 
     }
 
-    void add(ArrayList<Individual> offsprings) {
+    void add(List<Individual> offsprings) {
         individuals.addAll(offsprings);
 
         for (int in = 0; in < offsprings.size(); in++) {
             Individual child = offsprings.get(in);
             int child_task = child.getSkillFactor();
 
-            ArrayList<Individual> rankInTask = countRank(child_task);
+            List<Individual> rankInTask = countRank(child_task);
             int index = -1;
             for (int j = 0; j < rankInTask.size(); j++) {
                 if (rankInTask.get(j).getFitnessTask().get(child_task) > child.getFitnessTask().get(child_task)) {
@@ -142,7 +142,7 @@ class Population {
             if (index > -1)
                 for (int j = index; j < rankInTask.size(); j++) {
                     Individual tmp = rankInTask.get(j);
-                    ArrayList<Integer> rank = tmp.getFactorial_rank();
+                    List<Integer> rank = tmp.getFactorialRank();
                     rank.set(child_task, rank.get(child_task) + 1);
                     tmp.setFactorial_rank(rank);
                 }
@@ -162,8 +162,8 @@ class Population {
         }
     }
 
-    private ArrayList<Individual> countRank(int task) {
-        ArrayList<Individual> lstIndividualInTask = new ArrayList<>();
+    private List<Individual> countRank(int task) {
+        List<Individual> lstIndividualInTask = new ArrayList<>();
 
         for (Individual ind : individuals) {
             boolean check = true;
@@ -189,7 +189,7 @@ class Population {
         return best;
     }
 
-    ArrayList<Individual> getIndividuals() {
+    List<Individual> getIndividuals() {
         return individuals;
     }
 

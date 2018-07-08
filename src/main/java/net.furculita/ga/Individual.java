@@ -1,15 +1,15 @@
 package net.furculita.ga;
 
-import java.util.ArrayList;
+import java.util.List;
 
 public class Individual {
-    ArrayList<Double> gen;
-    ArrayList<Double> fitnessTask;
-    ArrayList<Integer> factorial_rank;
+    List<Double> gen;
+    List<Double> fitnessTask;
+    List<Integer> factorial_rank;
     private int skillFactor;
     private double scalarFitness;
 
-    Individual(ArrayList<Double> gen, ArrayList<Double> fitnessTask) {
+    Individual(List<Double> gen, List<Double> fitnessTask) {
         super();
         this.gen = gen;
         this.fitnessTask = fitnessTask;
@@ -23,15 +23,15 @@ public class Individual {
         return min;
     }
 
-    ArrayList<Double> getGen() {
+    List<Double> getGen() {
         return gen;
     }
 
-    ArrayList<Double> getFitnessTask() {
+    List<Double> getFitnessTask() {
         return fitnessTask;
     }
 
-    void setFitnessTask(ArrayList<Double> fitnessTask) {
+    void setFitnessTask(List<Double> fitnessTask) {
         this.fitnessTask = fitnessTask;
     }
 
@@ -51,11 +51,11 @@ public class Individual {
         this.scalarFitness = scalarFitness;
     }
 
-    ArrayList<Integer> getFactorial_rank() {
+    List<Integer> getFactorialRank() {
         return factorial_rank;
     }
 
-    void setFactorial_rank(ArrayList<Integer> factorial_rank) {
+    void setFactorial_rank(List<Integer> factorial_rank) {
         this.factorial_rank = factorial_rank;
     }
 

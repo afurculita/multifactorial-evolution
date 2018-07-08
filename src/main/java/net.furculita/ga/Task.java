@@ -1,6 +1,5 @@
 package net.furculita.ga;
 
-import java.util.ArrayList;
 import java.util.List;
 
 abstract public class Task {
@@ -20,11 +19,11 @@ abstract public class Task {
         return stride;
     }
 
-    public abstract void makeIndividualVail(ArrayList<Double> ind);
+    public abstract void makeIndividualVail(List<Double> ind);
 
-    public abstract boolean checkIndividualVail(ArrayList<Double> ind);
+    public abstract boolean checkIndividualVail(List<Double> ind);
 
-    public abstract Double computeFitness(ArrayList<Double> ind);
+    public abstract Double computeFitness(List<Double> ind);
 
     public abstract int getLenGen();
 }

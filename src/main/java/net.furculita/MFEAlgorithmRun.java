@@ -6,10 +6,11 @@ import net.furculita.tasks.Knapsack;
 import net.furculita.tasks.TSP;
 
 import java.util.ArrayList;
+import java.util.List;
 
 public class MFEAlgorithmRun {
     public static void main(String[] args) {
-        ArrayList<Task> tasks = new ArrayList<>();
+        List<Task> tasks = new ArrayList<>();
         tasks.add(new Knapsack("data/knapsack/100/s000.kp"));
         tasks.add(new Knapsack("data/knapsack/100/s001.kp"));
         tasks.add(new Knapsack("data/knapsack/100/s002.kp"));

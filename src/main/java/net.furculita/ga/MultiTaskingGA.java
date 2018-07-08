@@ -1,6 +1,7 @@
 package net.furculita.ga;
 
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Random;
 
 /**
@@ -11,11 +12,11 @@ public class MultiTaskingGA {
     private Population population;
     private int timeResetPopulation;
     private double pOfMutation;
-    private ArrayList<Task> tasks;
+    private List<Task> tasks;
     private static final double LIMIT = 10000000000.0;
     private static final int ITERATIONS = 1000;
 
-    public MultiTaskingGA(ArrayList<Task> tasks, int numOfInd, double pOfMutation, int timeResetPopulation) {
+    public MultiTaskingGA(List<Task> tasks, int numOfInd, double pOfMutation, int timeResetPopulation) {
         this.tasks = tasks;
         this.timeResetPopulation = timeResetPopulation;
         this.pOfMutation = pOfMutation;
@@ -50,8 +51,8 @@ public class MultiTaskingGA {
                 changeBest = 0;
             }
 
-            ArrayList<Individual> individuals = population.getIndividuals();
-            ArrayList<Individual> children = new ArrayList<>();
+            List<Individual> individuals = population.getIndividuals();
+            List<Individual> children = new ArrayList<>();
 
             for (int j = 0; j < nN; j++) {
                 Individual a = individuals.get(r.nextInt(individuals.size()));
@@ -83,9 +84,9 @@ public class MultiTaskingGA {
         }
     }
 
-    private void reComputeFitnessTaskForChild(ArrayList<Individual> children) {
+    private void reComputeFitnessTaskForChild(List<Individual> children) {
         for (Individual child : children) {
-            ArrayList<Double> fT = child.getFitnessTask();
+            List<Double> fT = child.getFitnessTask();
             for (int j = 0; j < tasks.size(); j++)
                 if (fT.get(j) == LIMIT) {
                     Task t = tasks.get(j);

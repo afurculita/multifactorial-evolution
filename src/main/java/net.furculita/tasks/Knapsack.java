@@ -5,6 +5,7 @@ import net.furculita.ga.Task;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Scanner;
 
 public class Knapsack extends Task {
@@ -69,8 +70,8 @@ public class Knapsack extends Task {
     }
 
     @Override
-    public Double computeFitness(ArrayList<Double> ind) {
-        ArrayList<Integer> x = decode(ind);
+    public Double computeFitness(List<Double> ind) {
+        List<Integer> x = decode(ind);
         double res = 0;
         for (int i = 0; i < x.size(); i++)
             res -= prices[i] * x.get(i);
@@ -79,8 +80,8 @@ public class Knapsack extends Task {
     }
 
     @Override
-    public boolean checkIndividualVail(ArrayList<Double> ind) {
-        ArrayList<Integer> x = decode(ind);
+    public boolean checkIndividualVail(List<Double> ind) {
+        List<Integer> x = decode(ind);
         double res = 0;
         for (int i = 0; i < x.size(); i++)
             res += weights[i] * x.get(i);
@@ -88,16 +89,16 @@ public class Knapsack extends Task {
         return !(res <= capacity);
     }
 
-    private Double getWeight(ArrayList<Double> ind) {
-        ArrayList<Integer> x = decode(ind);
+    private Double getWeight(List<Double> ind) {
+        List<Integer> x = decode(ind);
         double res = 0;
         for (int i = 0; i < x.size(); i++)
             res += weights[i] * x.get(i);
         return res;
     }
 
-    public void makeIndividualVail(ArrayList<Double> x) {
-        ArrayList<Integer> x_decode = decode(x);
+    public void makeIndividualVail(List<Double> x) {
+        List<Integer> x_decode = decode(x);
         Double wx = getWeight(x);
         int i = 0;
         if (x.size() > dimension) {
@@ -121,10 +122,10 @@ public class Knapsack extends Task {
         }
     }
 
-    private ArrayList<Integer> decode(ArrayList<Double> x) {
-        ArrayList<Double> tmp_x = new ArrayList<>(x);
+    private List<Integer> decode(List<Double> x) {
+        List<Double> tmp_x = new ArrayList<>(x);
 
-        ArrayList<Integer> kp = new ArrayList<>();
+        List<Integer> kp = new ArrayList<>();
         if (tmp_x.size() > dimension) {
             stride = getStride(x, tmp_x, window);
 
