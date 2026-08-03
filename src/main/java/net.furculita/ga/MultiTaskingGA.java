@@ -199,7 +199,7 @@ public class MultiTaskingGA {
         population.getIndividuals().sort((i1, i2) -> {
             Double di1 = i1.getScalarFitness();
             Double di2 = i2.getScalarFitness();
-            return di1.compareTo(di2);
+            return di2.compareTo(di1);
         });
 
         ArrayList<Individual> newIndividuals = new ArrayList<>();
