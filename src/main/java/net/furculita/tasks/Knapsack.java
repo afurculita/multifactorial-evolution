@@ -8,13 +8,30 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Scanner;
 
+/**
+ * 0/1 knapsack problem.
+ *
+ * <p>Instance file format (whitespace separated): the number of items, the capacity, then one
+ * {@code weight value} pair per item. See {@code data/knapsack}.
+ *
+ * <p>Decoding rounds each gene: a value of {@code 0.5} or more selects the item. The fitness
+ * is the <em>negated</em> total value so that the task is minimised like every other
+ * {@link Task}. An over-weight selection is repaired by dropping selected items in
+ * ascending value/weight order until the capacity is respected.
+ */
 public class Knapsack extends Task {
     private int weights[], prices[];
     private double weightedPrices[];
     private int priceWeightLineNumbers[];
+
+    /** Window weights used to fold a chromosome longer than {@link #dimension}. */
     private double window[] = {Math.random(), Math.random(), Math.random(), Math.random()};
     private int stride;
 
+    /**
+     * @param fileName path to an instance file in the format described in the class comment
+     * @throws IllegalArgumentException if the file cannot be read
+     */
     public Knapsack(String fileName) {
         super();
 
@@ -31,6 +48,7 @@ public class Knapsack extends Task {
         return max;
     }
 
+    /** Sorts {@code a} ascending and applies the same permutation to {@code vt}. */
     private void sort(double a[], int na, int vt[]) {
         for (int i = 0; i < na - 1; i++)
             for (int j = i + 1; j < na; j++)
@@ -45,8 +63,7 @@ public class Knapsack extends Task {
     }
 
     private void parseFile(String fileName) {
-        try {
-            Scanner fileIn = new Scanner(new File(fileName));
+        try (Scanner fileIn = new Scanner(new File(fileName))) {
             dimension = fileIn.nextInt();
             capacity = fileIn.nextInt();
             weightedPrices = new double[dimension];
@@ -63,12 +80,13 @@ public class Knapsack extends Task {
                 weightedPrices[i] = prices[i] * 1.0 / weights[i];
             }
         } catch (FileNotFoundException e) {
-            e.printStackTrace();
+            throw new IllegalArgumentException("Cannot load knapsack instance '" + fileName + "'", e);
         }
 
         sort(weightedPrices, dimension, priceWeightLineNumbers);
     }
 
+    /** @return the negated total value of the selected items */
     @Override
     public Double computeFitness(List<Double> ind) {
         List<Integer> x = decode(ind);
@@ -79,6 +97,7 @@ public class Knapsack extends Task {
         return res;
     }
 
+    /** @return {@code true} if the selected items exceed the capacity */
     @Override
     public boolean checkIndividualVail(List<Double> ind) {
         List<Integer> x = decode(ind);
@@ -97,6 +116,10 @@ public class Knapsack extends Task {
         return res;
     }
 
+    /**
+     * Drops selected items in ascending value/weight order, by lowering the corresponding
+     * genes below the selection threshold, until the total weight fits the capacity.
+     */
     public void makeIndividualVail(List<Double> x) {
         List<Integer> x_decode = decode(x);
         Double wx = getWeight(x);
@@ -122,6 +145,7 @@ public class Knapsack extends Task {
         }
     }
 
+    /** Decodes a chromosome into a 0/1 selection vector of length {@link #dimension}. */
     private List<Integer> decode(List<Double> x) {
         List<Double> tmp_x = new ArrayList<>(x);
 
@@ -129,7 +153,8 @@ public class Knapsack extends Task {
         if (tmp_x.size() > dimension) {
             stride = getStride(x, tmp_x, window);
 
-            for (int i = 0; i < tmp_x.size(); i += stride) {
+            for (int k = 0; k < dimension; k++) {
+                int i = k * stride;
                 double tmp = 0;
                 for (int j = 0; j < window.length; j++) {
                     tmp += tmp_x.get(i + j) * window[j];
