@@ -5,17 +5,47 @@ import java.util.List;
 import java.util.Random;
 
 /**
- * Based on "Multifactorial Evolution: Towards Evolutionary
- * Multitasking", by Abhishek Gupta, Yew-Soon Ong, and Liang Feng
+ * Multifactorial Evolutionary Algorithm (MFEA).
+ *
+ * <p>Based on "Multifactorial Evolution: Toward Evolutionary Multitasking" by Abhishek
+ * Gupta, Yew-Soon Ong and Liang Feng, IEEE Transactions on Evolutionary Computation 20(3),
+ * 2016. All tasks share one population in a unified random-key search space. Each
+ * generation:
+ * <ol>
+ *   <li>tracks the best individual per task and re-initialises the population after
+ *       {@code timeResetPopulation} generations without any improvement;</li>
+ *   <li>produces {@code 2 * nN} offspring by <em>assortative mating</em>: two random parents
+ *       undergo one-point crossover if they share a skill factor or with probability
+ *       {@code 1 - pOfMutation}, otherwise each is mutated on its own;</li>
+ *   <li>assigns each child a skill factor by <em>vertical cultural transmission</em>
+ *       (crossover children copy a random parent, mutants copy their parent) and evaluates
+ *       it on that task only;</li>
+ *   <li>keeps the {@code numOfInd} individuals with the highest scalar fitness.</li>
+ * </ol>
+ * The generation count is fixed by {@link #ITERATIONS}.
  */
 public class MultiTaskingGA {
     private Population population;
     private int timeResetPopulation;
     private double pOfMutation;
     private List<Task> tasks;
+    private final Random random = new Random();
+
+    /** Placeholder factorial cost for a task an individual has not been evaluated on. */
     private static final double LIMIT = 10000000000.0;
+
+    /** Number of generations of a {@link #run(int)}. */
     private static final int ITERATIONS = 1000;
 
+    /**
+     * @param tasks               tasks to optimise together (all are minimised)
+     * @param numOfInd            population size
+     * @param pOfMutation         probability that two parents with different skill factors are
+     *                            mutated instead of crossed over; {@code 1 - pOfMutation} plays
+     *                            the role of the paper's random mating probability {@code rmp}
+     * @param timeResetPopulation generations without improvement on any task before the
+     *                            population is re-initialised
+     */
     public MultiTaskingGA(List<Task> tasks, int numOfInd, double pOfMutation, int timeResetPopulation) {
         this.tasks = tasks;
         this.timeResetPopulation = timeResetPopulation;
@@ -23,9 +53,16 @@ public class MultiTaskingGA {
         population = new Population(numOfInd, tasks);
     }
 
-    public void run(int nN) {
+    /**
+     * Runs {@link #ITERATIONS} generations and prints the best factorial cost of every task
+     * at each generation.
+     *
+     * @param nN number of parent pairs mated per generation, i.e. {@code 2 * nN} offspring
+     * @return the best individual found for each task, in task order
+     */
+    public List<Individual> run(int nN) {
         ArrayList<Individual> bestSolution = new ArrayList<>();
-        Random r = new Random();
+        Random r = random;
 
         population.init();
 
@@ -82,8 +119,11 @@ public class MultiTaskingGA {
         for (Individual aBestSolution : bestSolution) {
             System.out.println(aBestSolution);
         }
+
+        return bestSolution;
     }
 
+    /** Fills in the factorial cost of the tasks a child was not evaluated on. */
     private void reComputeFitnessTaskForChild(List<Individual> children) {
         for (Individual child : children) {
             List<Double> fT = child.getFitnessTask();
@@ -95,11 +135,15 @@ public class MultiTaskingGA {
         }
     }
 
+    /**
+     * One-point crossover producing two children. Each child inherits the skill factor of a
+     * random parent and is evaluated on that task only.
+     */
     private ArrayList<Individual> crossOver(Individual a, Individual b) {
         ArrayList<Individual> children = new ArrayList<>();
         ArrayList<Integer> fR = new ArrayList<>();
         for (int i = 0; i < tasks.size(); i++) fR.add(population.getIndividuals().size() + 1);
-        Random r = new Random();
+        Random r = random;
 
         int t = r.nextInt(a.getGen().size() - 1);
         ArrayList<Double> cb = new ArrayList<>();
@@ -117,7 +161,7 @@ public class MultiTaskingGA {
             population.makeIndividualVail(ca);
 
         Individual ind = new Individual(ca, null);
-        double rand = Math.random();
+        double rand = r.nextDouble();
 
         if (rand < 0.5) {
             ind.setSkillFactor(a.getSkillFactor());
@@ -140,7 +184,7 @@ public class MultiTaskingGA {
 
         Individual ind2 = new Individual(cb, null);
 
-        rand = Math.random();
+        rand = r.nextDouble();
         if (rand < 0.5) {
             ind2.setSkillFactor(a.getSkillFactor());
         } else {
@@ -156,14 +200,18 @@ public class MultiTaskingGA {
                 fitnessTa.add(tasks.get(i).computeFitness(cb));
 
         ind2.setFitnessTask(fitnessTa);
-        ind2.setFactorial_rank(fR);
+        ind2.setFactorial_rank(new ArrayList<>(fR));
         children.add(ind2);
 
         return children;
     }
 
+    /**
+     * Uniform mutation of a single random gene. The child keeps its parent's skill factor
+     * and is evaluated on that task only.
+     */
     private Individual mutation(Individual a) {
-        Random r = new Random();
+        Random r = random;
         ArrayList<Integer> fR = new ArrayList<>();
 
         for (int i = 0; i < tasks.size(); i++)
@@ -195,12 +243,13 @@ public class MultiTaskingGA {
         return ind;
     }
 
+    /**
+     * Elitist survivor selection: keeps the {@code numOfInd} individuals with the
+     * <em>highest</em> scalar fitness out of parents and offspring.
+     */
     private void selection() {
-        population.getIndividuals().sort((i1, i2) -> {
-            Double di1 = i1.getScalarFitness();
-            Double di2 = i2.getScalarFitness();
-            return di1.compareTo(di2);
-        });
+        population.getIndividuals().sort((i1, i2) ->
+                Double.compare(i2.getScalarFitness(), i1.getScalarFitness()));
 
         ArrayList<Individual> newIndividuals = new ArrayList<>();
         for (int i = 0; i < population.nIndividual; i++) {

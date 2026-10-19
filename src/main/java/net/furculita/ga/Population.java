@@ -4,6 +4,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
+/**
+ * The shared population of a multitasking run, together with the factorial-rank
+ * bookkeeping of the MFEA.
+ *
+ * <p>All individuals live in one unified search space: random-key chromosomes whose length
+ * is the largest {@link Task#getLenGen()} among the tasks. Each task decodes the part of
+ * the chromosome it needs.
+ */
 class Population {
     int nIndividual;
     private int nTask;
@@ -11,19 +19,25 @@ class Population {
     private List<Individual> individuals = null;
     private List<Task> tasks;
 
+    /**
+     * @param n     population size
+     * @param tasks the tasks being optimised; the chromosome length is their largest dimension
+     */
     Population(int n, List<Task> tasks) {
         this.nIndividual = n;
         this.nTask = tasks.size();
         this.tasks = tasks;
         int max = 0;
-        int min = Integer.MAX_VALUE;
         for (Task task : tasks) {
             if (task.getLenGen() > max) max = task.getLenGen();
-            if (task.getLenGen() < min) min = task.getLenGen();
         }
         lenGen = max;
     }
 
+    /**
+     * (Re)creates the population with uniformly random chromosomes. Every individual is
+     * repaired for every task, evaluated on every task and then ranked.
+     */
     void init() {
         Random r = new Random();
         individuals = new ArrayList<>();
@@ -48,6 +62,10 @@ class Population {
         updateRankPopulation();
     }
 
+    /**
+     * @return {@code true} if the chromosome is infeasible for at least one task
+     * @see Task#checkIndividualVail(List)
+     */
     boolean checkIndividualVail(ArrayList<Double> ind) {
         for (Task t : tasks) {
             if (t.checkIndividualVail(ind)) {
@@ -58,6 +76,10 @@ class Population {
         return false;
     }
 
+    /**
+     * Repairs the chromosome in place, cycling over the tasks until a full round passes with
+     * no task needing a repair (one task's repair can invalidate another task's constraint).
+     */
     void makeIndividualVail(ArrayList<Double> ind) {
         int i = 0;
         int xd = 0;
@@ -76,6 +98,10 @@ class Population {
         }
     }
 
+    /**
+     * Recomputes factorial rank, skill factor and scalar fitness of the first
+     * {@link #nIndividual} individuals from their full factorial-cost vectors.
+     */
     void updateRankPopulation() {
         ArrayList<ArrayList<Individual>> rankInTask = new ArrayList<>();
 
@@ -124,6 +150,12 @@ class Population {
 
     }
 
+    /**
+     * Appends offspring to the population and ranks each one on its skill-factor task only
+     * (selective evaluation: offspring are not evaluated on the other tasks, so they are
+     * ranked last there). Existing individuals that the child outranks are pushed down by
+     * one on that task.
+     */
     void add(List<Individual> offsprings) {
         individuals.addAll(offsprings);
 
@@ -158,10 +190,13 @@ class Population {
         }
 
         for (Individual ind : offsprings) {
-            ind.setScalarFitness(1 / (ind.getMinFactorialRank()));
+            // 1.0 / ... : the original integer division made every child that was not
+            // ranked first score 0, so survivor selection could not tell them apart.
+            ind.setScalarFitness(1.0 / (ind.getMinFactorialRank()));
         }
     }
 
+    /** @return the current individuals sorted by ascending factorial cost on {@code task} */
     private List<Individual> countRank(int task) {
         List<Individual> lstIndividualInTask = new ArrayList<>();
 
@@ -183,6 +218,7 @@ class Population {
         return lstIndividualInTask;
     }
 
+    /** @return the individual ranked first on {@code task}, or {@code null} if none is */
     Individual getIndividualBestOfTask(int task) {
         Individual best = null;
         for (Individual individual : individuals) if (individual.factorial_rank.get(task) == 1) best = individual;

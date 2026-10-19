@@ -2,7 +2,7 @@
 <project version="4">
   <component name="CompilerConfiguration">
     <bytecodeTargetLevel>
-      <module name="MultifactorialEvolution" target="1.8" />
+      <module name="MultifactorialEvolution" target="21" />
     </bytecodeTargetLevel>
   </component>
 </project>

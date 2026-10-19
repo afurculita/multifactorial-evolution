@@ -1,5 +1,6 @@
 package net.furculita.util;
 
+/** A city position as read from a TSPLIB {@code NODE_COORD_SECTION}. */
 public class TSPCoordinate {
     private double x;
     private double y;
