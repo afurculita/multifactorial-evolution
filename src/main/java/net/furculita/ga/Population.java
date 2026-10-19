@@ -1,37 +1,51 @@
 package net.furculita.ga;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Random;
 
 /**
- * The shared population of a multitasking run, together with the factorial-rank
- * bookkeeping of the MFEA.
+ * The shared population of a multitasking run and the factorial-rank bookkeeping of the
+ * MFEA.
  *
  * <p>All individuals live in one unified search space: random-key chromosomes whose length
- * is the largest {@link Task#getLenGen()} among the tasks. Each task decodes the part of
- * the chromosome it needs.
+ * is the largest {@link Task#getLenGen()} among the tasks. Ranking follows Algorithm 1 of
+ * Gupta, Ong and Feng (2016): per task, the individuals that were evaluated on it are sorted
+ * by factorial cost; the others are ranked last. Scalar fitness is {@code 1 / min rank}.
  */
-class Population {
-    int nIndividual;
-    private int nTask;
-    private int lenGen;
-    private List<Individual> individuals = null;
-    private List<Task> tasks;
+final class Population {
+    private final List<Task> tasks;
+    private final int size;
+    private final int chromosomeLength;
+    private final Random random;
+    private List<Individual> individuals = new ArrayList<>();
 
     /**
-     * @param n     population size
-     * @param tasks the tasks being optimised; the chromosome length is their largest dimension
+     * @param tasks  the tasks being optimised; the chromosome length is their largest dimension
+     * @param size   population size
+     * @param random random source
      */
-    Population(int n, List<Task> tasks) {
-        this.nIndividual = n;
-        this.nTask = tasks.size();
+    Population(List<Task> tasks, int size, Random random) {
         this.tasks = tasks;
+        this.size = size;
+        this.random = random;
         int max = 0;
-        for (Task task : tasks) {
-            if (task.getLenGen() > max) max = task.getLenGen();
-        }
-        lenGen = max;
+        for (Task task : tasks) max = Math.max(max, task.getLenGen());
+        this.chromosomeLength = max;
+    }
+
+    int size() {
+        return size;
+    }
+
+    int chromosomeLength() {
+        return chromosomeLength;
+    }
+
+    List<Individual> individuals() {
+        return individuals;
     }
 
     /**
@@ -39,197 +53,100 @@ class Population {
      * repaired for every task, evaluated on every task and then ranked.
      */
     void init() {
-        Random r = new Random();
-        individuals = new ArrayList<>();
-
-        for (int i = 0; i < nIndividual; i++) {
-            ArrayList<Double> g = new ArrayList<>();
-            for (int j = 0; j < lenGen; j++) {
-                g.add(r.nextDouble());
-            }
-            if (checkIndividualVail(g))
-                makeIndividualVail(g);
-
-            ArrayList<Double> fitnessTa = new ArrayList<>();
-            for (Task task : tasks) {
-                fitnessTa.add(task.computeFitness(g));
-            }
-
-            Individual ind = new Individual(g, fitnessTa);
+        individuals = new ArrayList<>(size);
+        for (int i = 0; i < size; i++) {
+            List<Double> genes = new ArrayList<>(chromosomeLength);
+            for (int j = 0; j < chromosomeLength; j++) genes.add(random.nextDouble());
+            repairForAllTasks(genes);
+            Individual ind = new Individual(genes, tasks.size());
+            for (int t = 0; t < tasks.size(); t++) ind.setCost(t, tasks.get(t).computeFitness(genes));
             individuals.add(ind);
         }
-
-        updateRankPopulation();
+        rank(individuals);
     }
 
     /**
-     * @return {@code true} if the chromosome is infeasible for at least one task
-     * @see Task#checkIndividualVail(List)
+     * Replaces the first {@code elites.size()} individuals by copies of the given elites
+     * (used after a restart so that the best known solution of every task survives).
      */
-    boolean checkIndividualVail(ArrayList<Double> ind) {
-        for (Task t : tasks) {
-            if (t.checkIndividualVail(ind)) {
-                return true;
-            }
+    void reinsert(List<Individual> elites) {
+        for (int i = 0; i < elites.size() && i < individuals.size(); i++) {
+            individuals.set(i, elites.get(i).copy());
         }
-
-        return false;
+        rank(individuals);
     }
 
     /**
      * Repairs the chromosome in place, cycling over the tasks until a full round passes with
      * no task needing a repair (one task's repair can invalidate another task's constraint).
      */
-    void makeIndividualVail(ArrayList<Double> ind) {
-        int i = 0;
-        int xd = 0;
-        while (true) {
+    void repairForAllTasks(List<Double> genes) {
+        int cleanInARow = 0;
+        for (int i = 0; cleanInARow < tasks.size(); i = (i + 1) % tasks.size()) {
             Task t = tasks.get(i);
-            if (t.checkIndividualVail(ind)) {
-                xd = 0;
-                t.makeIndividualVail(ind);
+            if (t.isInfeasible(genes)) {
+                t.repair(genes);
+                cleanInARow = 0;
             } else {
-                xd++;
+                cleanInARow++;
             }
-            if (xd >= tasks.size()) {
-                break;
-            }
-            i = (i + 1) % tasks.size();
         }
     }
 
     /**
-     * Recomputes factorial rank, skill factor and scalar fitness of the first
-     * {@link #nIndividual} individuals from their full factorial-cost vectors.
+     * Assigns factorial ranks, skill factor and scalar fitness to every individual of the
+     * pool. Individuals without a cost on a task are ranked last ({@code pool.size()}) on
+     * that task so that an unevaluated task can never become the skill factor.
      */
-    void updateRankPopulation() {
-        ArrayList<ArrayList<Individual>> rankInTask = new ArrayList<>();
-
-        for (int i = 0; i < nTask; i++) {
-            ArrayList<Individual> lstIndividualInTask = new ArrayList<>();
-            rankInTask.add(lstIndividualInTask);
-        }
-
-        for (int i_in = 0; i_in < nIndividual; i_in++) {
-            Individual ind = individuals.get(i_in);
-            for (int i = 0; i < nTask; i++) {
-                ArrayList<Individual> lstIndividualInTask = rankInTask.get(i);
-                boolean check = true;
-                for (int j = 0; j < lstIndividualInTask.size(); j++) {
-                    if (lstIndividualInTask.get(j).getFitnessTask().get(i) > ind.getFitnessTask().get(i)) {
-                        lstIndividualInTask.add(j, ind);
-                        check = false;
-                        break;
-                    }
-                }
-                if (check) {
-                    lstIndividualInTask.add(ind);
-                }
-                rankInTask.set(i, lstIndividualInTask);
+    static void rank(List<Individual> pool) {
+        if (pool.isEmpty()) return;
+        int nTasks = pool.get(0).getCosts().length;
+        Integer[] order = new Integer[pool.size()];
+        for (int t = 0; t < nTasks; t++) {
+            final int task = t;
+            int evaluated = 0;
+            for (int i = 0; i < pool.size(); i++) {
+                if (pool.get(i).isEvaluatedOn(task)) order[evaluated++] = i;
             }
+            Arrays.sort(order, 0, evaluated, Comparator.comparingDouble(i -> pool.get(i).getCost(task)));
+            for (Individual ind : pool) ind.setRank(task, pool.size());
+            for (int r = 0; r < evaluated; r++) pool.get(order[r]).setRank(task, r + 1);
         }
-
-        for (int i = 0; i < nIndividual; i++) {
-            Individual ind = individuals.get(i);
-            ArrayList<Integer> factorial_rank = new ArrayList<>();
-            int min_rank = nIndividual + 2;
-            int task_rank_min = -1;
-            for (int j = 0; j < nTask; j++) {
-                int rankJ = rankInTask.get(j).indexOf(ind) + 1;
-                factorial_rank.add(rankJ);
-                if (rankJ < min_rank) {
-                    min_rank = rankJ;
-                    task_rank_min = j;
+        for (Individual ind : pool) {
+            int best = -1, bestRank = Integer.MAX_VALUE;
+            for (int t = 0; t < nTasks; t++) {
+                if (ind.getRank(t) < bestRank) {
+                    bestRank = ind.getRank(t);
+                    best = t;
                 }
             }
-
-            ind.setFactorial_rank(factorial_rank);
-            ind.setSkillFactor(task_rank_min);
-            ind.setScalarFitness(1.0 / (min_rank));
+            ind.setSkillFactor(best);
+            ind.setScalarFitness(1.0 / bestRank);
         }
-
     }
 
     /**
-     * Appends offspring to the population and ranks each one on its skill-factor task only
-     * (selective evaluation: offspring are not evaluated on the other tasks, so they are
-     * ranked last there). Existing individuals that the child outranks are pushed down by
-     * one on that task.
+     * Elitist survivor selection: ranks the union of the current population and the
+     * offspring, then keeps the {@link #size()} individuals with the highest scalar fitness.
+     * Ties are broken randomly so that offspring and parents compete fairly.
      */
-    void add(List<Individual> offsprings) {
-        individuals.addAll(offsprings);
-
-        for (int in = 0; in < offsprings.size(); in++) {
-            Individual child = offsprings.get(in);
-            int child_task = child.getSkillFactor();
-
-            List<Individual> rankInTask = countRank(child_task);
-            int index = -1;
-            for (int j = 0; j < rankInTask.size(); j++) {
-                if (rankInTask.get(j).getFitnessTask().get(child_task) > child.getFitnessTask().get(child_task)) {
-                    index = j;
-                    break;
-                }
-            }
-            if (index > -1)
-                for (int j = index; j < rankInTask.size(); j++) {
-                    Individual tmp = rankInTask.get(j);
-                    List<Integer> rank = tmp.getFactorialRank();
-                    rank.set(child_task, rank.get(child_task) + 1);
-                    tmp.setFactorial_rank(rank);
-                }
-            else {
-                index = rankInTask.size();
-            }
-            ArrayList<Integer> facRankInd = new ArrayList<>();
-            for (int ii = 0; ii < nTask; ii++)
-                facRankInd.add(individuals.size() + 1);
-            facRankInd.set(child_task, index + 1);
-            child.setFactorial_rank(facRankInd);
-            offsprings.set(in, child);
-        }
-
-        for (Individual ind : offsprings) {
-            // 1.0 / ... : the original integer division made every child that was not
-            // ranked first score 0, so survivor selection could not tell them apart.
-            ind.setScalarFitness(1.0 / (ind.getMinFactorialRank()));
-        }
+    void selectFrom(List<Individual> offspring) {
+        List<Individual> pool = new ArrayList<>(individuals.size() + offspring.size());
+        pool.addAll(individuals);
+        pool.addAll(offspring);
+        java.util.Collections.shuffle(pool, random);
+        rank(pool);
+        pool.sort(Comparator.comparingDouble(Individual::getScalarFitness).reversed());
+        individuals = new ArrayList<>(pool.subList(0, Math.min(size, pool.size())));
+        rank(individuals);
     }
 
-    /** @return the current individuals sorted by ascending factorial cost on {@code task} */
-    private List<Individual> countRank(int task) {
-        List<Individual> lstIndividualInTask = new ArrayList<>();
-
-        for (Individual ind : individuals) {
-            boolean check = true;
-            for (int j = 0; j < lstIndividualInTask.size(); j++) {
-                if (lstIndividualInTask.get(j).getFitnessTask().get(task)
-                        > ind.getFitnessTask().get(task)) {
-                    lstIndividualInTask.add(j, ind);
-                    check = false;
-                    break;
-                }
-            }
-            if (check) {
-                lstIndividualInTask.add(ind);
-            }
-        }
-
-        return lstIndividualInTask;
-    }
-
-    /** @return the individual ranked first on {@code task}, or {@code null} if none is */
-    Individual getIndividualBestOfTask(int task) {
+    /** @return the individual with the lowest cost on {@code task} among those evaluated on it, or {@code null} */
+    Individual bestOn(int task) {
         Individual best = null;
-        for (Individual individual : individuals) if (individual.factorial_rank.get(task) == 1) best = individual;
+        for (Individual ind : individuals) {
+            if (ind.isEvaluatedOn(task) && (best == null || ind.getCost(task) < best.getCost(task))) best = ind;
+        }
         return best;
-    }
-
-    List<Individual> getIndividuals() {
-        return individuals;
-    }
-
-    void setIndividuals(ArrayList<Individual> individuals) {
-        this.individuals = individuals;
     }
 }

@@ -21,25 +21,39 @@ class KnapsackTest {
         Knapsack kp = new Knapsack("data/knapsack/100/s000.kp");
         assertEquals(100, kp.getLenGen());
         List<Double> none = new ArrayList<>(Collections.nCopies(100, 0.0));
-        assertFalse(kp.checkIndividualVail(none));
+        assertFalse(kp.isInfeasible(none));
         assertEquals(0.0, kp.computeFitness(none));
     }
 
     @Test
     void overweightSelectionIsDetectedAndRepaired() {
         Knapsack kp = new Knapsack("data/knapsack/100/s000.kp");
-        List<Double> all = new ArrayList<>(Collections.nCopies(100, 0.9));
-        assertTrue(kp.checkIndividualVail(all), "selecting every item exceeds the capacity");
+        List<Double> all = new ArrayList<>(Collections.nCopies(100, 1.0)); // genes at the upper bound
+        assertTrue(kp.isInfeasible(all), "selecting every item exceeds the capacity");
 
-        kp.makeIndividualVail(all);
-        assertFalse(kp.checkIndividualVail(all), "repair must produce a feasible selection");
+        kp.repair(all);
+        assertFalse(kp.isInfeasible(all), "repair must produce a feasible selection");
         double fitness = kp.computeFitness(all);
         assertTrue(fitness < 0, "repair keeps some items");
         assertTrue(fitness >= -S000_OPTIMUM, "no feasible selection beats the optimum");
+        for (double g : all) assertTrue(g >= 0.0 && g <= 1.0);
+    }
+
+    @Test
+    void longerChromosomeUsesOnlyItsFirstGenes() {
+        Knapsack kp = new Knapsack("data/knapsack/50/s000.kp");
+        List<Double> genes = new ArrayList<>(Collections.nCopies(120, 0.0));
+        genes.set(0, 0.9);
+        genes.set(49, 0.9);
+        genes.set(50, 0.9); // beyond the task's dimension: ignored
+        double twoItems = kp.computeFitness(genes);
+        assertTrue(twoItems < 0);
+        assertEquals(twoItems, kp.computeFitness(genes.subList(0, 50)));
     }
 
     @Test
     void unreadableInstanceIsRejected() {
         assertThrows(IllegalArgumentException.class, () -> new Knapsack("data/knapsack/missing.kp"));
+        assertThrows(IllegalArgumentException.class, () -> new Knapsack("data/tsp/burma14.tsp"));
     }
 }
