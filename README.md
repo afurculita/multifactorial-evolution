@@ -15,31 +15,34 @@ task can transfer implicitly to the others.
 
 ## How the algorithm works
 
-The implementation follows Gupta, Ong and Feng (2016):
+The implementation follows Algorithm 1 of Gupta, Ong and Feng (2016):
 
 | Concept | Where |
 | --- | --- |
-| **Unified search space.** Every individual is a random-key chromosome, a list of doubles in `[0, 1)` whose length is the largest task dimension. Each task decodes the chromosome into its own representation: the TSP visits cities in ascending key order, the knapsack selects items whose key rounds to 1. | `Task`, `TSP`, `Knapsack` |
-| **Factorial cost, factorial rank, skill factor, scalar fitness.** An individual's cost on each task, its rank per task, the task it is best at, and `1 / min(rank)`, the single value used to compare individuals across tasks. | `Individual`, `Population` |
-| **Assortative mating.** Two random parents are crossed over (one-point crossover) if they share a skill factor or with probability `1 - pOfMutation`; otherwise each is mutated on its own (one random gene is resampled). | `MultiTaskingGA.run` |
-| **Vertical cultural transmission and selective evaluation.** A crossover child inherits the skill factor of a random parent, a mutant that of its parent, and is evaluated on that task only. | `MultiTaskingGA.crossOver`, `mutation` |
-| **Elitist survivor selection.** Parents and offspring compete; the `numOfInd` individuals with the highest scalar fitness survive. | `MultiTaskingGA.selection` |
-| **Restart.** If no task improves for `timeResetPopulation` generations, the population is re-initialised; the best individual per task is kept outside the population. | `MultiTaskingGA.run` |
+| **Unified search space.** Every individual is a random-key chromosome, a list of doubles in `[0, 1]` whose length is the largest task dimension. A task of dimension `D` reads the first `D` genes: the TSP visits cities in ascending key order, the knapsack selects items whose key is above 0.5. | `Task`, `TSP`, `Knapsack` |
+| **Factorial cost, factorial rank, skill factor, scalar fitness.** An individual's cost on each task it was evaluated on, its rank per task (unevaluated tasks rank last), the task it is best at, and `1 / min(rank)`, the single value used to compare individuals across tasks. | `Individual`, `Population.rank` |
+| **Assortative mating.** Two random parents undergo simulated binary crossover (SBX, η = 2) if they share a skill factor or with the random mating probability `rmp`; otherwise each is mutated on its own. Every child also receives polynomial mutation (η = 5, per-gene probability `1 / length`). | `MultiTaskingGA.run`, `Operators` |
+| **Vertical cultural transmission and selective evaluation.** A crossover child imitates the skill factor of a random parent, a mutant that of its parent. The child is repaired for that task, improved by the task's optional local search, and evaluated on that task only. | `MultiTaskingGA.child` |
+| **Local search.** TSP offspring get a bounded first-improvement 2-opt pass whose result is written back into the genes (Lamarckian learning). The knapsack has no local search. | `TSP.localSearch` |
+| **Elitist survivor selection.** Parents and offspring are ranked together on every task once per generation; the `populationSize` individuals with the highest scalar fitness survive. | `Population.selectFrom` |
+| **Elites and restarts.** The best individual of every task is kept as an immutable snapshot. If no elite improves for `restartPatience` generations, the population is re-initialised and the elites are re-inserted. | `MultiTaskingGA.run` |
 
-Infeasible chromosomes (an over-weight knapsack selection) are repaired in place before
-evaluation, cycling over all tasks until every constraint holds.
+Infeasible chromosomes (an over-weight knapsack selection) are repaired in place. The
+initial population is repaired and evaluated for every task; offspring only for their
+skill-factor task.
 
 ## Project layout
 
 ```
 src/main/java/net/furculita/
-  MFEAlgorithmRun.java      example entry point (5 knapsacks + kroA100)
-  ga/MultiTaskingGA.java    the MFEA loop: mating, offspring, selection
-  ga/Population.java        population, repair, factorial ranks
-  ga/Individual.java        chromosome + multifactorial bookkeeping
-  ga/Task.java              task contract
-  tasks/TSP.java            TSP task (random-key decoding)
-  tasks/Knapsack.java       0/1 knapsack task (rounding decoding + greedy repair)
+  MFEAlgorithmRun.java      command-line entry point
+  ga/MultiTaskingGA.java    the MFEA loop: mating, offspring, elites, restarts
+  ga/Population.java        population, factorial ranking, survivor selection
+  ga/Operators.java         SBX crossover and polynomial mutation on [0, 1]
+  ga/Individual.java        chromosome + multifactorial bookkeeping (read-only outside the package)
+  ga/Task.java              task contract: fitness, feasibility, repair, optional local search
+  tasks/TSP.java            TSP task (random-key decoding, 2-opt local search)
+  tasks/Knapsack.java       0/1 knapsack task (threshold decoding, greedy repair)
   util/TSPFileParser.java   TSPLIB reader (EUC_2D and GEO)
 src/test/java/              JUnit 5 tests
 data/tsp/                   TSPLIB instances (*.tsp) and optimal tours (*.opt.tour)
@@ -56,21 +59,56 @@ java -jar target/multifactorial-evolution-1.0-SNAPSHOT.jar
 mvn exec:java                    # same, through Maven
 ```
 
-Run from the repository root: instance paths in `MFEAlgorithmRun` are relative to it.
-The program prints, for every generation and task, the factorial cost vector of the
-individual ranked first on that task, then the best individual found per task.
+Run from the repository root: the default instance paths are relative to it. Without
+arguments the program optimises five 100-item knapsacks (`data/knapsack/100/s000..s004.kp`)
+together with the 100-city TSP `kroA100`, prints the best known cost of every task every
+50 generations and finally the best individual per task.
 
-To optimise other instances or change the parameters, edit `MFEAlgorithmRun`:
+```
+java -jar target/multifactorial-evolution-1.0-SNAPSHOT.jar [options] [instance ...]
+
+  instance            a TSPLIB .tsp file (TSP task) or a .kp file (knapsack task)
+  --generations N     number of generations (default 1000)
+  --population N      population size (default 50)
+  --pairs N           parent pairs per generation, i.e. 2N offspring (default 50)
+  --rmp P             random mating probability (default 0.3, as in the paper)
+  --mutation P        per-gene mutation probability (default 1 / chromosome length)
+  --restart N         generations without improvement before a restart; 0 = never (default 100)
+  --local-search N    2-opt sweeps per TSP offspring; 0 = off (default 1)
+  --seed S            random seed; the same seed reproduces the same run (default 42)
+  --print-every N     progress line every N generations (default 50)
+```
+
+For example, two TSPs of different size in one population:
+
+```bash
+java -jar target/multifactorial-evolution-1.0-SNAPSHOT.jar --seed 1 data/tsp/berlin52.tsp data/tsp/eil101.tsp
+```
+
+From Java:
 
 ```java
 List<Task> tasks = List.of(new Knapsack("data/knapsack/100/s000.kp"),
                            new TSP("data/tsp/kroA100.tsp"));
-// population size, mutation probability for cross-task pairs, restart patience
-MultiTaskingGA ga = new MultiTaskingGA(tasks, 50, 0.1, 50);
-List<Individual> best = ga.run(50);   // 50 parent pairs per generation
+MultiTaskingGA ga = new MultiTaskingGA(tasks, 50, 0.3, 100, 42L)   // population, rmp, restart patience, seed
+        .setProgressListener((generation, bestCosts) -> { /* ... */ });
+List<Individual> best = ga.run(1000, 50);                          // generations, parent pairs per generation
+double tourLength = best.get(1).getCost(1);
 ```
 
-The number of generations is the constant `MultiTaskingGA.ITERATIONS` (1000).
+### Results on the default configuration
+
+Single runs, seed 42, about 2 seconds. Knapsack optima were computed
+by dynamic programming; the `kroA100` optimum is the published 21,282.
+
+| Task | Optimum | Best found |
+| --- | ---: | ---: |
+| knapsack s000 | 32,066 | 32,066 |
+| knapsack s001 | 35,046 | 34,958 |
+| knapsack s002 | 33,615 | 33,481 |
+| knapsack s003 | 37,517 | 37,498 |
+| knapsack s004 | 43,873 | 42,599 |
+| TSP kroA100 (tour length) | 21,282 | 21,546 |
 
 ## Data formats
 
@@ -95,13 +133,15 @@ minimised.
 ## Tests
 
 `mvn test` runs the JUnit 5 suite: TSPLIB parsing checked against published optimal tours,
-TSP and knapsack decoding, feasibility and repair, and two short end-to-end runs of the
-algorithm (including tasks of different dimension sharing one population).
+TSP and knapsack decoding, feasibility and repair, the SBX and polynomial mutation bounds,
+factorial ranking with unevaluated tasks, 2-opt never worsening a tour, and short end-to-end
+runs (elites never regress across restarts, the same seed reproduces the same result, tasks
+of different dimension share one population, burma14 reaches its published optimum).
 
 ## Known limitations and suggested improvements
 
 See [REVIEW.md](REVIEW.md) for a review of the implementation against the papers, the
-bugs fixed in the latest revision and a prioritised list of improvements.
+bugs fixed, the improvements implemented since and the remaining suggestions.
 
 ## References
 

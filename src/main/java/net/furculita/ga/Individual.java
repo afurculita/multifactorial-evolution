@@ -1,5 +1,8 @@
 package net.furculita.ga;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -8,53 +11,85 @@ import java.util.List;
  * <p>Following Gupta, Ong and Feng (2016) an individual carries, besides its random-key
  * chromosome, the multifactorial bookkeeping the algorithm needs:
  * <ul>
- *   <li><b>factorial cost</b> ({@code fitnessTask}): its objective value on every task.
- *       Tasks the individual was not evaluated on hold {@code MultiTaskingGA.LIMIT};</li>
- *   <li><b>factorial rank</b>: its 1-based position in the population when sorted by
- *       factorial cost on each task;</li>
+ *   <li><b>factorial cost</b>: its objective value on every task it has been evaluated on;
+ *       the others hold {@link #NOT_EVALUATED} (selective evaluation);</li>
+ *   <li><b>factorial rank</b>: its 1-based position in the population sorted by factorial
+ *       cost on each task; individuals not evaluated on a task are ranked last there;</li>
  *   <li><b>skill factor</b>: the index of the task on which it ranks best;</li>
- *   <li><b>scalar fitness</b>: {@code 1 / min(factorial rank)}, the single value used
- *       for survivor selection across tasks.</li>
+ *   <li><b>scalar fitness</b>: {@code 1 / min(factorial rank)}, the single value used for
+ *       survivor selection across tasks.</li>
  * </ul>
+ * Genes and costs are exposed read-only; {@link #copy()} produces an independent snapshot
+ * (used for the per-task elites that survive population restarts).
  */
-public class Individual {
-    List<Double> gen;
-    List<Double> fitnessTask;
-    List<Integer> factorial_rank;
-    private int skillFactor;
+public final class Individual {
+
+    /** Factorial cost of a task the individual has not been evaluated on. */
+    public static final double NOT_EVALUATED = Double.POSITIVE_INFINITY;
+
+    private final List<Double> genes;
+    private final double[] costs;
+    private final int[] ranks;
+    private int skillFactor = -1;
     private double scalarFitness;
 
     /**
-     * @param gen         the random-key chromosome
-     * @param fitnessTask the factorial cost on every task, or {@code null} if not yet known
+     * @param genes  the random-key chromosome (owned by the individual afterwards)
+     * @param nTasks the number of tasks in the run
      */
-    Individual(List<Double> gen, List<Double> fitnessTask) {
-        super();
-        this.gen = gen;
-        this.fitnessTask = fitnessTask;
+    Individual(List<Double> genes, int nTasks) {
+        this.genes = genes;
+        this.costs = new double[nTasks];
+        Arrays.fill(costs, NOT_EVALUATED);
+        this.ranks = new int[nTasks];
     }
 
-    /** @return the best (smallest) factorial rank over all tasks */
-    Integer getMinFactorialRank() {
-        Integer min = 10000000;
-        for (Integer tmp : factorial_rank) {
-            if (min > tmp) min = tmp;
-        }
-        return min;
+    /** @return a deep, independent copy */
+    public Individual copy() {
+        Individual c = new Individual(new ArrayList<>(genes), costs.length);
+        System.arraycopy(costs, 0, c.costs, 0, costs.length);
+        System.arraycopy(ranks, 0, c.ranks, 0, ranks.length);
+        c.skillFactor = skillFactor;
+        c.scalarFitness = scalarFitness;
+        return c;
     }
 
-    /** @return the random-key chromosome */
-    public List<Double> getGen() {
-        return gen;
+    /** @return the random-key chromosome, read-only */
+    public List<Double> getGenes() {
+        return Collections.unmodifiableList(genes);
     }
 
-    /** @return the factorial cost on every task (see class comment) */
-    public List<Double> getFitnessTask() {
-        return fitnessTask;
+    /** Mutable access for the variation operators and repair. */
+    List<Double> genes() {
+        return genes;
     }
 
-    void setFitnessTask(List<Double> fitnessTask) {
-        this.fitnessTask = fitnessTask;
+    /** @return the factorial cost on {@code task}, or {@link #NOT_EVALUATED} */
+    public double getCost(int task) {
+        return costs[task];
+    }
+
+    /** @return a copy of the factorial cost vector */
+    public double[] getCosts() {
+        return costs.clone();
+    }
+
+    void setCost(int task, double cost) {
+        costs[task] = cost;
+    }
+
+    /** @return {@code true} if the individual has a factorial cost on {@code task} */
+    public boolean isEvaluatedOn(int task) {
+        return costs[task] != NOT_EVALUATED;
+    }
+
+    /** @return the 1-based factorial rank on {@code task} as of the last ranking */
+    public int getRank(int task) {
+        return ranks[task];
+    }
+
+    void setRank(int task, int rank) {
+        ranks[task] = rank;
     }
 
     /** @return the index of the task on which this individual ranks best */
@@ -75,19 +110,15 @@ public class Individual {
         this.scalarFitness = scalarFitness;
     }
 
-    /** @return the 1-based rank on every task */
-    public List<Integer> getFactorialRank() {
-        return factorial_rank;
-    }
-
-    void setFactorial_rank(List<Integer> factorial_rank) {
-        this.factorial_rank = factorial_rank;
-    }
-
     @Override
     public String toString() {
-        return "Individual [gen=" + gen + ", fitnessTask=" + fitnessTask
-                + ", factorialRank=" + factorial_rank + ", skillFactor="
-                + skillFactor + ", scalarFitness=" + scalarFitness + "]";
+        StringBuilder sb = new StringBuilder("Individual[skillFactor=").append(skillFactor).append(", costs=[");
+        for (int t = 0; t < costs.length; t++) {
+            if (t > 0) sb.append(", ");
+            sb.append(costs[t] == NOT_EVALUATED ? "n/a" : String.valueOf(costs[t]));
+        }
+        return sb.append("], ranks=").append(Arrays.toString(ranks))
+                .append(", scalarFitness=").append(scalarFitness)
+                .append(", genes=").append(genes).append(']').toString();
     }
 }

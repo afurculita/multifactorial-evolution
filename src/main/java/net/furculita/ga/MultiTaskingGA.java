@@ -2,6 +2,7 @@ package net.furculita.ga;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Random;
 
 /**
@@ -12,250 +13,152 @@ import java.util.Random;
  * 2016. All tasks share one population in a unified random-key search space. Each
  * generation:
  * <ol>
- *   <li>tracks the best individual per task and re-initialises the population after
- *       {@code timeResetPopulation} generations without any improvement;</li>
- *   <li>produces {@code 2 * nN} offspring by <em>assortative mating</em>: two random parents
- *       undergo one-point crossover if they share a skill factor or with probability
- *       {@code 1 - pOfMutation}, otherwise each is mutated on its own;</li>
+ *   <li>produces {@code 2 * pairs} offspring by <em>assortative mating</em>: two random
+ *       parents undergo simulated binary crossover if they share a skill factor or with the
+ *       random mating probability {@code rmp}; otherwise each parent is mutated on its own
+ *       with polynomial mutation;</li>
  *   <li>assigns each child a skill factor by <em>vertical cultural transmission</em>
- *       (crossover children copy a random parent, mutants copy their parent) and evaluates
- *       it on that task only;</li>
- *   <li>keeps the {@code numOfInd} individuals with the highest scalar fitness.</li>
+ *       (crossover children imitate a random parent, mutants their parent), repairs it for
+ *       that task, applies the task's optional local search and evaluates it on that task
+ *       only (<em>selective evaluation</em>);</li>
+ *   <li>ranks parents and offspring together on every task and keeps the
+ *       {@code populationSize} individuals with the highest scalar fitness;</li>
+ *   <li>updates the per-task elites (immutable snapshots) and, after
+ *       {@code restartPatience} generations without any elite improving, re-initialises
+ *       the population and re-inserts the elites.</li>
  * </ol>
- * The generation count is fixed by {@link #ITERATIONS}.
  */
 public class MultiTaskingGA {
-    private Population population;
-    private int timeResetPopulation;
-    private double pOfMutation;
-    private List<Task> tasks;
-    private final Random random = new Random();
 
-    /** Placeholder factorial cost for a task an individual has not been evaluated on. */
-    private static final double LIMIT = 10000000000.0;
+    /** Receives the best known cost of every task after each generation. */
+    @FunctionalInterface
+    public interface ProgressListener {
+        void onGeneration(int generation, double[] bestCostPerTask);
+    }
 
-    /** Number of generations of a {@link #run(int)}. */
-    private static final int ITERATIONS = 1000;
+    /** Random mating probability used by Gupta, Ong and Feng (2016). */
+    public static final double DEFAULT_RMP = 0.3;
+    /** SBX distribution index used by the paper. */
+    public static final double SBX_ETA = 2.0;
+    /** Polynomial mutation distribution index used by the paper. */
+    public static final double PM_ETA = 5.0;
+
+    private final List<Task> tasks;
+    private final double rmp;
+    private final int restartPatience;
+    private final Random random;
+    private final Population population;
+    private double mutationRate;
+    private ProgressListener listener = (g, best) -> {
+    };
 
     /**
-     * @param tasks               tasks to optimise together (all are minimised)
-     * @param numOfInd            population size
-     * @param pOfMutation         probability that two parents with different skill factors are
-     *                            mutated instead of crossed over; {@code 1 - pOfMutation} plays
-     *                            the role of the paper's random mating probability {@code rmp}
-     * @param timeResetPopulation generations without improvement on any task before the
-     *                            population is re-initialised
+     * @param tasks           tasks to optimise together (all are minimised)
+     * @param populationSize  population size
+     * @param rmp             random mating probability: chance that parents with different
+     *                        skill factors are crossed over instead of mutated separately
+     * @param restartPatience generations without improvement of any elite before the
+     *                        population is re-initialised; {@code 0} disables restarts
+     * @param seed            seed of the random source, for reproducible runs
      */
-    public MultiTaskingGA(List<Task> tasks, int numOfInd, double pOfMutation, int timeResetPopulation) {
-        this.tasks = tasks;
-        this.timeResetPopulation = timeResetPopulation;
-        this.pOfMutation = pOfMutation;
-        population = new Population(numOfInd, tasks);
+    public MultiTaskingGA(List<Task> tasks, int populationSize, double rmp, int restartPatience, long seed) {
+        if (tasks.isEmpty()) throw new IllegalArgumentException("at least one task is required");
+        if (populationSize < 2) throw new IllegalArgumentException("population size must be at least 2");
+        if (rmp < 0 || rmp > 1) throw new IllegalArgumentException("rmp must be in [0, 1]");
+        this.tasks = List.copyOf(tasks);
+        this.rmp = rmp;
+        this.restartPatience = restartPatience;
+        this.random = new Random(seed);
+        this.population = new Population(this.tasks, populationSize, random);
+        this.mutationRate = 1.0 / population.chromosomeLength();
+    }
+
+    /** Per-gene polynomial mutation probability; defaults to {@code 1 / chromosome length}. */
+    public MultiTaskingGA setMutationRate(double mutationRate) {
+        if (mutationRate < 0 || mutationRate > 1) throw new IllegalArgumentException("mutation rate must be in [0, 1]");
+        this.mutationRate = mutationRate;
+        return this;
+    }
+
+    /** Called after every generation with the best known cost per task. */
+    public MultiTaskingGA setProgressListener(ProgressListener listener) {
+        this.listener = Objects.requireNonNull(listener);
+        return this;
     }
 
     /**
-     * Runs {@link #ITERATIONS} generations and prints the best factorial cost of every task
-     * at each generation.
+     * Runs the algorithm.
      *
-     * @param nN number of parent pairs mated per generation, i.e. {@code 2 * nN} offspring
-     * @return the best individual found for each task, in task order
+     * @param generations number of generations
+     * @param pairs       number of parent pairs mated per generation, i.e. {@code 2 * pairs} offspring
+     * @return the best individual found for each task, in task order (independent copies;
+     *         each carries at least the cost on its own task)
      */
-    public List<Individual> run(int nN) {
-        ArrayList<Individual> bestSolution = new ArrayList<>();
-        Random r = random;
-
+    public List<Individual> run(int generations, int pairs) {
         population.init();
+        List<Individual> elites = new ArrayList<>();
+        for (int t = 0; t < tasks.size(); t++) elites.add(population.bestOn(t).copy());
 
-        for (int i = 0; i < tasks.size(); i++)
-            bestSolution.add(population.getIndividuals().get(i));
-
-        int changeBest = 0;
-
-        for (int i = 0; i < ITERATIONS; i++) {
-            for (int ii = 0; ii < tasks.size(); ii++) {
-                Individual ind = population.getIndividualBestOfTask(ii);
-                if (bestSolution.get(ii).fitnessTask.get(ii) > ind.getFitnessTask().get(ii)) {
-                    changeBest = 0;
-                    bestSolution.set(ii, ind);
-                }
-
-                System.out.println(i + ":" + ii + ": " + ind.getFitnessTask());
-            }
-
-            changeBest++;
-            if (changeBest >= timeResetPopulation) {
-                population.init();
-                changeBest = 0;
-            }
-
-            List<Individual> individuals = population.getIndividuals();
-            List<Individual> children = new ArrayList<>();
-
-            for (int j = 0; j < nN; j++) {
-                Individual a = individuals.get(r.nextInt(individuals.size()));
-                Individual b = individuals.get(r.nextInt(individuals.size()));
-                while (a == b) b = individuals.get(r.nextInt(individuals.size()));
-                int ta = a.getSkillFactor();
-                int tb = b.getSkillFactor();
-                double t = r.nextDouble();
-
-                if ((ta == tb) || (t > pOfMutation)) {
-                    children.addAll(crossOver(a, b));
+        int stall = 0;
+        for (int g = 1; g <= generations; g++) {
+            List<Individual> offspring = new ArrayList<>(2 * pairs);
+            List<Individual> parents = population.individuals();
+            for (int p = 0; p < pairs; p++) {
+                Individual a = parents.get(random.nextInt(parents.size()));
+                Individual b = parents.get(random.nextInt(parents.size()));
+                while (b == a) b = parents.get(random.nextInt(parents.size()));
+                if (a.getSkillFactor() == b.getSkillFactor() || random.nextDouble() < rmp) {
+                    List<Double> c1 = new ArrayList<>(a.genes());
+                    List<Double> c2 = new ArrayList<>(b.genes());
+                    Operators.sbx(c1, c2, SBX_ETA, random);
+                    offspring.add(child(c1, random.nextBoolean() ? a : b));
+                    offspring.add(child(c2, random.nextBoolean() ? a : b));
                 } else {
-                    Individual ia = mutation(a);
-                    Individual ib = mutation(b);
-                    children.add(ia);
-                    children.add(ib);
+                    offspring.add(child(new ArrayList<>(a.genes()), a));
+                    offspring.add(child(new ArrayList<>(b.genes()), b));
                 }
             }
 
-            population.add(children);
-            selection();
-            reComputeFitnessTaskForChild(children);
-            population.updateRankPopulation();
-        }
+            population.selectFrom(offspring);
 
-        System.out.println("Solution:");
-        for (Individual aBestSolution : bestSolution) {
-            System.out.println(aBestSolution);
-        }
-
-        return bestSolution;
-    }
-
-    /** Fills in the factorial cost of the tasks a child was not evaluated on. */
-    private void reComputeFitnessTaskForChild(List<Individual> children) {
-        for (Individual child : children) {
-            List<Double> fT = child.getFitnessTask();
-            for (int j = 0; j < tasks.size(); j++)
-                if (fT.get(j) == LIMIT) {
-                    Task t = tasks.get(j);
-                    fT.set(j, t.computeFitness(child.gen));
+            boolean improved = false;
+            for (int t = 0; t < tasks.size(); t++) {
+                Individual best = population.bestOn(t);
+                if (best != null && best.getCost(t) < elites.get(t).getCost(t)) {
+                    elites.set(t, best.copy());
+                    improved = true;
                 }
+            }
+            stall = improved ? 0 : stall + 1;
+            if (restartPatience > 0 && stall >= restartPatience) {
+                population.init();
+                population.reinsert(elites);
+                stall = 0;
+            }
+
+            double[] bestCosts = new double[tasks.size()];
+            for (int t = 0; t < tasks.size(); t++) bestCosts[t] = elites.get(t).getCost(t);
+            listener.onGeneration(g, bestCosts);
         }
+
+        List<Individual> result = new ArrayList<>(elites.size());
+        for (Individual e : elites) result.add(e.copy());
+        return result;
     }
 
     /**
-     * One-point crossover producing two children. Each child inherits the skill factor of a
-     * random parent and is evaluated on that task only.
+     * Finishes a child: polynomial mutation, skill factor inherited from {@code parent},
+     * repair and local search for that task, evaluation on that task only.
      */
-    private ArrayList<Individual> crossOver(Individual a, Individual b) {
-        ArrayList<Individual> children = new ArrayList<>();
-        ArrayList<Integer> fR = new ArrayList<>();
-        for (int i = 0; i < tasks.size(); i++) fR.add(population.getIndividuals().size() + 1);
-        Random r = random;
-
-        int t = r.nextInt(a.getGen().size() - 1);
-        ArrayList<Double> cb = new ArrayList<>();
-        ArrayList<Double> ca = new ArrayList<>();
-        for (int i = 0; i < t; i++) {
-            ca.add(a.getGen().get(i));
-            cb.add(b.getGen().get(i));
-        }
-        for (int i = t; i < a.getGen().size(); i++) {
-            ca.add(b.getGen().get(i));
-            cb.add(a.getGen().get(i));
-        }
-
-        if (population.checkIndividualVail(ca))
-            population.makeIndividualVail(ca);
-
-        Individual ind = new Individual(ca, null);
-        double rand = r.nextDouble();
-
-        if (rand < 0.5) {
-            ind.setSkillFactor(a.getSkillFactor());
-        } else {
-            ind.setSkillFactor(b.getSkillFactor());
-        }
-        ArrayList<Double> fitnessTa = new ArrayList<>();
-        for (int i = 0; i < tasks.size(); i++)
-            if (i != ind.getSkillFactor())
-                fitnessTa.add(LIMIT);
-            else
-                fitnessTa.add(tasks.get(i).computeFitness(ca));
-
-        ind.setFitnessTask(fitnessTa);
-        ind.setFactorial_rank(fR);
-        children.add(ind);
-
-        if (population.checkIndividualVail(cb))
-            population.makeIndividualVail(cb);
-
-        Individual ind2 = new Individual(cb, null);
-
-        rand = r.nextDouble();
-        if (rand < 0.5) {
-            ind2.setSkillFactor(a.getSkillFactor());
-        } else {
-            ind2.setSkillFactor(b.getSkillFactor());
-        }
-
-        fitnessTa = new ArrayList<>();
-
-        for (int i = 0; i < tasks.size(); i++)
-            if (i != ind2.getSkillFactor())
-                fitnessTa.add(LIMIT);
-            else
-                fitnessTa.add(tasks.get(i).computeFitness(cb));
-
-        ind2.setFitnessTask(fitnessTa);
-        ind2.setFactorial_rank(new ArrayList<>(fR));
-        children.add(ind2);
-
-        return children;
-    }
-
-    /**
-     * Uniform mutation of a single random gene. The child keeps its parent's skill factor
-     * and is evaluated on that task only.
-     */
-    private Individual mutation(Individual a) {
-        Random r = random;
-        ArrayList<Integer> fR = new ArrayList<>();
-
-        for (int i = 0; i < tasks.size(); i++)
-            fR.add(population.getIndividuals().size() + 1);
-
-        int t = r.nextInt(a.getGen().size());
-        ArrayList<Double> c = new ArrayList<>(a.getGen());
-
-        c.set(t, r.nextDouble());
-
-        if (population.checkIndividualVail(c))
-            population.makeIndividualVail(c);
-
-        Individual ind = new Individual(c, null);
-
-        ind.setSkillFactor(a.getSkillFactor());
-
-        ArrayList<Double> fitnessTa = new ArrayList<>();
-
-        for (int i = 0; i < tasks.size(); i++)
-            if (i != ind.getSkillFactor())
-                fitnessTa.add(LIMIT);
-            else
-                fitnessTa.add(tasks.get(i).computeFitness(c));
-
-        ind.setFitnessTask(fitnessTa);
-        ind.setFactorial_rank(fR);
-
-        return ind;
-    }
-
-    /**
-     * Elitist survivor selection: keeps the {@code numOfInd} individuals with the
-     * <em>highest</em> scalar fitness out of parents and offspring.
-     */
-    private void selection() {
-        population.getIndividuals().sort((i1, i2) ->
-                Double.compare(i2.getScalarFitness(), i1.getScalarFitness()));
-
-        ArrayList<Individual> newIndividuals = new ArrayList<>();
-        for (int i = 0; i < population.nIndividual; i++) {
-            newIndividuals.add(population.getIndividuals().get(i));
-        }
-
-        population.setIndividuals(newIndividuals);
+    private Individual child(List<Double> genes, Individual parent) {
+        Operators.polynomialMutation(genes, mutationRate, PM_ETA, random);
+        int skill = parent.getSkillFactor();
+        Task task = tasks.get(skill);
+        if (task.isInfeasible(genes)) task.repair(genes);
+        task.localSearch(genes);
+        Individual child = new Individual(genes, tasks.size());
+        child.setSkillFactor(skill);
+        child.setCost(skill, task.computeFitness(genes));
+        return child;
     }
 }

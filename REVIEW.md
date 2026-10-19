@@ -12,27 +12,31 @@ the search into a near-random walk, plus several smaller correctness problems. T
 fixed here. What remains are design choices that limit solution quality and clarity; they
 are listed below with concrete suggestions rather than changed, so the author can decide.
 
-## Measured effect of the fixes
+## Measured results
 
-Default configuration in `MFEAlgorithmRun` (5 × 100-item knapsacks + `kroA100`, population
-50, 100 offspring per generation, 1000 generations). Knapsack optima computed by dynamic
-programming; the `kroA100` optimum is the published 21,282. One run each, so treat the
-numbers as indicative.
+Default configuration (5 × 100-item knapsacks + `kroA100`, population 50, 100 offspring per
+generation, 1000 generations). Knapsack optima computed by dynamic programming; the
+`kroA100` optimum is the published 21,282. Single runs; "fixed" is the first revision with
+the selection bugs fixed, "current" the revision that implements the suggestions below
+(seed 42, rmp 0.3, one 2-opt sweep per TSP offspring).
 
-| Task | Optimum | Original best | Fixed best |
-| --- | ---: | ---: | ---: |
-| knapsack s000 | 32,066 | 26,107 (81%) | 28,860 (90%) |
-| knapsack s001 | 35,046 | 21,742 (62%) | 26,372 (75%) |
-| knapsack s002 | 33,615 | 21,215 (63%) | 27,858 (83%) |
-| knapsack s003 | 37,517 | 23,169 (62%) | 26,207 (70%) |
-| knapsack s004 | 43,873 | 25,874 (59%) | 28,787 (66%) |
-| TSP kroA100 (tour length, lower is better) | 21,282 | 137,273 (6.5×) | 58,900 (2.8×) |
+| Task | Optimum | Original | Fixed | Current | Current, no 2-opt |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| knapsack s000 | 32,066 | 26,107 | 28,860 | **32,066** | 31,464 |
+| knapsack s001 | 35,046 | 21,742 | 26,372 | 34,958 | 34,635 |
+| knapsack s002 | 33,615 | 21,215 | 27,858 | 33,481 | 33,158 |
+| knapsack s003 | 37,517 | 23,169 | 26,207 | 37,498 | 37,073 |
+| knapsack s004 | 43,873 | 25,874 | 28,787 | 42,599 | **43,873** |
+| TSP kroA100 (lower is better) | 21,282 | 137,273 | 58,900 | 21,546 | 59,642 |
+| wall time | | 60 s | 10 s | 1.8 s | 1.1 s |
 
 A random `kroA100` tour is about 170,000 long, so the original run never left the random
-regime. The fixed run clearly optimises but is still far from optimal; see "Suggested
-improvements" for why.
+regime. The "no 2-opt" column shows that SBX, polynomial mutation and the corrected
+ranking account for the knapsack results and roughly halve the TSP gap on their own; the
+bounded 2-opt pass closes the rest. Other seeds give the same picture (seed 7: all five
+knapsacks within 1% of optimal, kroA100 = 21,376).
 
-## Changes made in this revision
+## Changes made in the first revision
 
 ### Build and tooling
 
@@ -97,112 +101,62 @@ use MOEA Framework.
   repair, rejection of bad input, and two end-to-end runs (same-dimension tasks, and a TSP
   plus a knapsack of different dimension).
 
-## Suggested improvements (not implemented)
+## Improvements implemented since the review
 
-Ordered by expected impact on solution quality and on the fidelity to the papers.
+The first six suggestions of the original review were implemented in the second revision (the "Current" column above).
 
-### 1. Make selective evaluation real and rank the combined population once
+1. **Selective evaluation and one ranking per generation.** Offspring are evaluated on
+   their skill-factor task only and keep `Individual.NOT_EVALUATED` elsewhere. Parents and
+   offspring are ranked together once per generation (`Population.rank`, O(T · M log M));
+   unevaluated tasks rank last so they can never become the skill factor. Ties in scalar
+   fitness are broken by a seeded shuffle, so offspring and parents compete fairly.
+2. **Operators suited to random keys, plus local search.** One-point crossover and
+   single-gene resampling were replaced by bounded SBX (η = 2) and polynomial mutation
+   (η = 5, per-gene rate 1 / length), the operators of Gupta et al. TSP offspring receive a
+   bounded first-improvement 2-opt sweep that is written back into the genes
+   (`TSP.localSearch`; `new TSP(file, sweeps)` or `--local-search` controls it, 0 disables).
+3. **Truncation instead of window folding.** A task of dimension `D` reads the first `D`
+   genes. `Task.getStride`, the per-task random windows and the `stride` side effect are
+   gone; decoding is deterministic and a chromosome longer than the task evaluates exactly
+   like its first `D` genes (tested).
+4. **Immutable elites that survive restarts.** The best of every task is kept as an
+   independent copy (`Individual.copy()`), re-inserted after a restart, and `Individual`
+   no longer exposes mutable internals. A test checks that the best known cost never
+   regresses across 200 generations with restarts every 5.
+5. **`TSP.decode` without `indexOf`.** Cities are sorted by key through an index array;
+   equal keys no longer produce a city visited twice (tested).
+6. **The paper's parameters.** `rmp` replaces the inverted `pOfMutation`; the generation
+   count, number of pairs, mutation rate and seed are parameters; progress goes to a
+   `ProgressListener` instead of `System.out`; `MFEAlgorithmRun` takes instances and all
+   parameters from the command line. Runs are reproducible from the seed (tested).
 
-`MultiTaskingGA.run` calls `reComputeFitnessTaskForChild` after selection, which evaluates
-every child (including the ones that were just discarded) on every task. That removes the
-whole point of selective evaluation, which is the main source of MFEA's efficiency, and
-costs `(T - 1) × offspring` extra evaluations per generation.
+Also done along the way: `checkIndividualVail`/`makeIndividualVail` renamed to
+`isInfeasible`/`repair`; knapsack selection uses a strict `> 0.5` threshold so that a gene
+at the upper bound 1.0 can still be repaired; the knapsack reads weights and values once
+instead of decoding the chromosome three times per evaluation.
 
-Also, parents keep the scalar fitness computed in the previous generation (ranks within
-the old population of N), while children get ranks within the combined population of
-N + offspring (`Population.add`). The two are not comparable, and `Population.add` is
-O(N²) per child because it rebuilds a sorted list for each one.
+## Remaining suggestions (not implemented)
 
-Suggestion, following the paper's Algorithm 1:
+### Naming and API
 
-```
-combined = parents + offspring
-for each task j:
-    sort the individuals that have a cost on j (others are ranked last)
-    assign factorial rank on j
-scalar fitness = 1 / min_j rank_j
-keep the best N by scalar fitness
-```
+* `Individual` genes are still `List<Double>`; `double[]` would avoid boxing on every
+  operator and evaluation. The run time is already small (about 2 s for the default
+  configuration), so this is a clean-up rather than a need.
+* `Task.dimension`/`capacity` are protected fields; a constructor-injected immutable
+  design would be cleaner.
 
-That is O(T · M log M) per generation, uses the `LIMIT` placeholder as intended (never
-evaluate a child on a task that is not its skill factor), and is exactly the ranking the
-paper describes.
-
-### 2. Use operators suited to the representation
-
-One-point crossover on random keys and resampling a single gene are weak search operators
-for permutations: a one-point cut keeps the relative order of keys on each side but the
-join scrambles the tour at the cut. Options, in increasing fidelity to the papers:
-
-* **Keep random keys** (continuous unified space, as in Gupta et al.): use simulated
-  binary crossover (SBX, η ≈ 2) and polynomial mutation (η ≈ 5) as the paper does, plus a
-  small per-gene mutation probability instead of exactly one gene.
-* **Move to permutation chromosomes** (as in Yuan et al. for PCOPs): a unified permutation
-  of length `max D_j`, with ordered crossover (OX) or PMX and swap/insertion mutation, and
-  task-specific decoding (TSP: the permutation restricted to its cities; knapsack: greedy
-  fill in permutation order). Yuan et al. report that this unified representation plus a
-  modified survivor selection makes multitasking effective on TSP/QAP/LOP/JSP.
-* Add a cheap local search (2-opt for TSP) to the skill-factor task of each child; the
-  papers' baselines are memetic.
-
-### 3. Handle differing task dimensions by truncation, not window folding
-
-The paper's unified random-key space simply lets task `j` read the first `D_j` keys.
-The custom sliding-window scheme (`Task.getStride`, the `window` arrays) is undocumented
-in the papers, adds hidden state (`Knapsack.stride` is set as a side effect of `decode`
-and consumed by `makeIndividualVail`), writes identical constants into several genes
-during repair (which can create duplicate keys, see item 5) and is hard to reason about.
-Truncation needs no padding, no stride and no per-task random weights.
-
-### 4. Keep elites across restarts and stop mutating them
-
-`population.init()` discards the whole population after `timeResetPopulation` generations
-without improvement, including the current best of every task. The best individuals are
-only remembered in `bestSolution`, but as live references: their `factorial_rank` lists
-are later mutated by `Population.add`, so the ranks printed at the end are stale (one
-printed best showed `[1, 1, 1, 1, 5, 70]`). Store immutable snapshots (copy the genes and
-costs) and re-insert the per-task elites into the new population after a restart.
-
-### 5. Replace `indexOf` decoding in `TSP.decode`
-
-`x.indexOf(ts[i])` is O(n²) and returns the same city twice when two keys are equal, which
-yields an invalid tour (a city visited twice, another skipped) with no error. Sort an index
-array by key instead:
-
-```java
-Integer[] order = IntStream.range(0, dimension).boxed().toArray(Integer[]::new);
-Arrays.sort(order, Comparator.comparingDouble(keys::get));
-```
-
-### 6. Expose the parameters the papers use
-
-* `pOfMutation` is the complement of the paper's random mating probability `rmp`:
-  `pOfMutation = 0.1` means cross-task crossover 90% of the time, whereas the paper uses
-  `rmp = 0.3`. Rename it to `rmp` with the paper's semantics.
-* `ITERATIONS = 1000` is a constant; make the generation count (or an evaluation budget)
-  a parameter of `run`.
-* Accept a random seed so experiments are reproducible; the task windows also use
-  `Math.random()`.
-* Replace per-generation `System.out` printing with a progress callback or a logger, and
-  move the instance list and parameters of `MFEAlgorithmRun` to command-line arguments.
-
-### 7. Naming and API
-
-* `checkIndividualVail` returns `true` for an *infeasible* chromosome; `Vail` is a typo for
-  valid. Rename to `isInfeasible`/`repair` (or `isFeasible` with inverted logic).
-* `Individual` exposes mutable internal lists; a record-like immutable individual with a
-  `withRanks(...)` style update avoids the aliasing bugs above.
-* Use `double[]` instead of `List<Double>` for chromosomes and costs; the current code
-  boxes every gene and copies the list on every decode. `Knapsack.checkIndividualVail`,
-  `getWeight` and `computeFitness` each decode the chromosome again.
-
-### 8. Broader TSPLIB support and experiment tooling
+### Broader TSPLIB support and experiment tooling
 
 * Support `EXPLICIT` edge-weight matrices (`FULL_MATRIX`, `UPPER_ROW`, `LOWER_DIAG_ROW`,
-  ...), `ATT` and `CEIL_2D` so that all 144 shipped instances are usable.
+  ...), `ATT` and `CEIL_2D` so that all 144 shipped instances are usable (23 are rejected
+  today).
 * Add a small experiment runner: multiple seeds, CSV output of best-so-far per generation,
   and a comparison against single-task runs of the same GA, which is the experiment the
-  papers use to show the benefit of multitasking.
+  papers use to show the benefit of multitasking. With the seed parameter and the
+  progress listener in place this is now a thin layer.
+* The permutation-based unified representation of Yuan et al. (2016), with ordered
+  crossover and swap mutation, remains an alternative worth comparing against the random-key
+  representation for larger TSP instances.
 * If a mature GA toolbox is wanted, MOEA Framework 5.1 (the latest release of the
   dependency the original POM declared but never used) provides SBX, PM, permutation
   operators and TSPLIB readers; otherwise keep the project dependency-free as it is now.

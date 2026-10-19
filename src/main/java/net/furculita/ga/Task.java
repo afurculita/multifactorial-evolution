@@ -6,14 +6,14 @@ import java.util.List;
  * One optimisation task taking part in a multitasking run.
  *
  * <p>Every task is a <em>minimisation</em> problem evaluated on the shared random-key
- * chromosome used by {@link MultiTaskingGA}: a list of doubles in {@code [0, 1)} whose
- * length is the largest {@link #getLenGen()} among all tasks in the run. A task decodes
- * that unified chromosome into its own solution representation (a tour, an item
- * selection, ...) before evaluating it.
+ * chromosome used by {@link MultiTaskingGA}: a list of doubles in {@code [0, 1]} whose
+ * length is the largest {@link #getLenGen()} among all tasks in the run. Following Gupta,
+ * Ong and Feng (2016), a task of dimension {@code D} reads the first {@code D} genes of the
+ * unified chromosome and ignores the rest.
  *
- * <p>Besides fitness, a task may define feasibility: {@link #checkIndividualVail(List)}
- * reports whether a chromosome violates the task's constraints and
- * {@link #makeIndividualVail(List)} repairs it in place.
+ * <p>Besides fitness, a task may define feasibility ({@link #isInfeasible(List)} and
+ * {@link #repair(List)}) and an optional Lamarckian local search
+ * ({@link #localSearch(List)}) applied to offspring whose skill factor is this task.
  */
 public abstract class Task {
 
@@ -24,61 +24,41 @@ public abstract class Task {
     protected int capacity;
 
     /**
-     * Computes the stride with which a chromosome longer than {@link #dimension} is folded
-     * into exactly {@code dimension} values. Each decoded value is the weighted sum of
-     * {@code window.length} consecutive genes starting at {@code k * stride}, for
-     * {@code k = 0 .. dimension - 1}. When the genes do not divide evenly, {@code tmp_tx}
-     * is zero-padded in place so that the last window stays inside the list.
+     * Checks a chromosome against this task's constraints.
      *
-     * @param tx     the original chromosome (only its size is used)
-     * @param tmp_tx a mutable copy of the chromosome that may be padded with zeros
-     * @param window the window weights
-     * @return the stride between consecutive windows
+     * @param genes the unified chromosome (at least {@link #getLenGen()} genes)
+     * @return {@code true} if the chromosome violates a constraint and needs {@link #repair}
      */
-    protected int getStride(List<Double> tx, List<Double> tmp_tx, double[] window) {
-        int stride;
-        if ((tmp_tx.size() - window.length) % (dimension - 1) == 0) {
-            stride = (tmp_tx.size() - window.length) / (dimension - 1);
-        } else {
-            stride = (tmp_tx.size() - window.length) / (dimension - 1) + 1;
-            int zero_padding = (dimension - 1) * stride + window.length - tx.size();
-            for (int i = 0; i < zero_padding; i++) {
-                tmp_tx.add(0.0);
-            }
-        }
-        return stride;
-    }
+    public abstract boolean isInfeasible(List<Double> genes);
 
     /**
      * Repairs a chromosome in place so that it satisfies this task's constraints.
      * Must be a no-op for a chromosome that is already feasible.
      *
-     * @param ind the chromosome to repair
+     * @param genes the unified chromosome to repair
      */
-    public abstract void makeIndividualVail(List<Double> ind);
-
-    /**
-     * Checks a chromosome against this task's constraints.
-     *
-     * <p>Note the inverted naming inherited from the original code: the method returns
-     * {@code true} when the chromosome is <strong>infeasible</strong> and needs repair.
-     *
-     * @param ind the chromosome to check
-     * @return {@code true} if the chromosome violates a constraint
-     */
-    public abstract boolean checkIndividualVail(List<Double> ind);
+    public abstract void repair(List<Double> genes);
 
     /**
      * Evaluates a chromosome. Lower is better: TSP returns the tour length, knapsack the
      * negated total value.
      *
-     * @param ind the chromosome to evaluate
+     * @param genes the unified chromosome
      * @return the objective value to minimise
      */
-    public abstract Double computeFitness(List<Double> ind);
+    public abstract double computeFitness(List<Double> genes);
 
     /**
-     * @return the number of genes this task needs, i.e. its {@link #dimension}
+     * Optional local search that improves the chromosome in place (Lamarckian learning).
+     * The default does nothing. Implementations must leave the chromosome feasible.
+     *
+     * @param genes the unified chromosome to improve
+     */
+    public void localSearch(List<Double> genes) {
+    }
+
+    /**
+     * @return the number of genes this task reads, i.e. its {@link #dimension}
      */
     public abstract int getLenGen();
 }
